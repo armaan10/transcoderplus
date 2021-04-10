@@ -1,6 +1,12 @@
 import json
 import os 
-
+def get_keyword_list(path):
+    l=[]
+    with open(path) as d_file:
+        for i in d_file:
+            
+            l.append(i[:-1].strip())   
+    return l
 def parse_json (path):
     
     
@@ -16,9 +22,12 @@ def parse_json (path):
 
 if __name__ == "__main__":
     
-    path="/home/armaan/Desktop/Desktop_Files/transcoderplus/dataset/python"
+    path="/home/armaan/Desktop/Desktop_Files/transcoderplus/dataset/cpp"
     f=os.listdir(path)
     print(f)
     
-    docs=parse_json(os.path.join(path,f[0]))
-
+    #docs=parse_json(os.path.join(path,f[0]))
+    #print(docs[0])
+    keywords=os.path.join(path,f[1])
+    l=get_keyword_list(keywords)
+    print(l)

@@ -167,8 +167,10 @@ size_py+=2
 dict_cpp[special_tks[0]]=size_cpp
 dict_cpp[special_tks[1]]=size_cpp+1
 size_cpp+=2
+
+
 """
-one_hot_vecs_py=torch.eye(size_py)
+
 one_hot_vecs_cpp=torch.eye(size_cpp)
 s=mask_tokens(tokens_list_py)
 s=make_batches(tokens_list_py)

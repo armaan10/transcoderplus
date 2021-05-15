@@ -7,11 +7,17 @@ Original file is located at
     https://colab.research.google.com/drive/17wek7XbkIhGDoJQGvcTKRFXKIjJfF6rO
 """
 
+# Commented out IPython magic to ensure Python compatibility.
+# %cd /content/
+!unzip bpe_files.zip
 
-
-
+# Commented out IPython magic to ensure Python compatibility.
+!git clone https://github.com/armaan10/transcoderplus.git
+# %cd transcoderplus/
+!git checkout v1
 
 import sys
+sys.path.insert(1, './utils')
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -41,7 +47,8 @@ class EncoderNet(nn.Module):
             inp_vec=self.emd_py(token_idx)
         else :
             inp_vec=self.emd_cpp(token_idx)
-        if self.training and pre_train==True:
+        #remove pretraining in and 
+        if self.training :
           try:
             assert inp_vec.size()==mask_matrix.size()
           except AssertionError as error:
@@ -171,7 +178,8 @@ def get_mask_pad_matrix(embd_dim,token_batch,no_seqs,seq_l):
 
 
 
-def train(model,optimizer,criterion,tokens,dicto,vocab_size,no_seqs,seq_l,one_hot,epochs=100):
+def train(model,optimizer,criterion,tokens,dicto,vocab_size,no_seqs,seq_l,one_hot,epochs=500):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.train()
     
     #unmasked_train_set_py=make_batches(tokens_list_py)
@@ -298,7 +306,7 @@ def train(model,optimizer,criterion,tokens,dicto,vocab_size,no_seqs,seq_l,one_ho
           
             """
 
-        log_int=10
+        log_int=50
         if ep%log_int ==0:
               end_time=time.time()
               t=end_time-start_time
@@ -320,11 +328,15 @@ def visualise_pretrain(model,word_list,dict_l):
   
   fig,ax=plt.subplots()
   for i,lang in enumerate(langs):
+    #fit tsne model 
+    
+    
+    
     batches=make_batches(word_list[i],pad=False)
     tokens_idx=get_tokens_idx(batches,dict_l[i])
     
     output=model(tokens_idx[0].to(device),0,0,lang)
-    print((output[0,1]==output[0,2]).sum())
+    
     
     output=output.squeeze(0)
    
@@ -340,10 +352,10 @@ def visualise_pretrain(model,word_list,dict_l):
 #visualise_pretrain(word_l)
 
 if __name__=="__main__":
-  vocab_py=parser.read_file("./bpe_files/py_train_vocab")
-  tokens_py=parser.read_file("./bpe_files/py_train_bpe")
-  vocab_cpp=parser.read_file("./bpe_files/cpp_train_vocab")
-  tokens_cpp=parser.read_file("./bpe_files/cpp_train_bpe")
+  vocab_py=parser.read_file("/content/bpe_files/py_train_vocab")
+  tokens_py=parser.read_file("/content/bpe_files/py_train_bpe")
+  vocab_cpp=parser.read_file("/content/bpe_files/cpp_train_vocab")
+  tokens_cpp=parser.read_file("/content/bpe_files/cpp_train_bpe")
 
   tokens_list_py=[]
   tokens_list_cpp=[]
@@ -355,13 +367,27 @@ if __name__=="__main__":
   dict_py,size_py=link.create_dict(vocab_py)
   dict_cpp,size_cpp=link.create_dict(vocab_cpp)
   special_tks=["[MASK]","[PAD]"]
-  dict_py[special_tks[0]]=size_py
+  special_tks={
+  "mask"  : "[MASK]",
+  "pad"   : "[PAD]",
+  "eos"   : "[EOS]",
+  "start_py"  : "[PY_S]",
+  "start_cpp" : "[CPP_S]"
+
+}
+  for keys in special_tks:
+    dict_py[special_tks[keys]]=size_py
+    dict_cpp[special_tks[keys]]=size_cpp
+    size_py+=1
+    size_cpp+=1
+  """dict_py[special_tks[0]]=size_py
   dict_py[special_tks[1]]=size_py+1
+
   size_py+=2
   dict_cpp[special_tks[0]]=size_cpp
   dict_cpp[special_tks[1]]=size_cpp+1
-  size_cpp+=2
-  pad_idx=[dict_py[special_tks[1]],dict_cpp[special_tks[1]]]
+  size_cpp+=2"""
+  pad_idx=[dict_py[special_tks["pad"]],dict_cpp[special_tks["pad"]]]
   #print(tokens_list_py)
 
   #reduce cpp for now
@@ -373,7 +399,7 @@ if __name__=="__main__":
   att_h=8
   output_dim=1024
   num_layers=6
-  lr=0.001
+  lr=0.01
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   model=EncoderNet(vocab_size, model_dim, att_h, output_dim,num_layers,pad_idx).to(device)
   criterion=nn.CrossEntropyLoss()
@@ -383,12 +409,13 @@ if __name__=="__main__":
   seq_l=16
   one_hot_vecs_py=torch.eye(size_py)
   one_hot_vecs_cpp=torch.eye(size_cpp)
+  epochs=500
+  model=train(model,optimizer,criterion,[tokens_list_py,tokens_list_cpp],[dict_py,dict_cpp],vocab_size,no_seqs,seq_l,[one_hot_vecs_py,one_hot_vecs_cpp],epochs)
 
-  model=train(model,optimizer,criterion,[tokens_list_py,tokens_list_cpp],[dict_py,dict_cpp],vocab_size,no_seqs,seq_l,[one_hot_vecs_py,one_hot_vecs_cpp],100)
   model.eval()
   #index 0-py 1-cpp
   word_l=[['return','if','None'],['return','if','NULL']]
-  visualise_pretrain(model,word_l,[dict_py,dict_cpp])
+  torch.save(model.state_dict,"/content/model-{}".format(epochs))
 
-
+visualise_pretrain(model,word_l,[dict_py,dict_cpp])
 

@@ -7,14 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/17wek7XbkIhGDoJQGvcTKRFXKIjJfF6rO
 """
 
-# Commented out IPython magic to ensure Python compatibility.
-# %cd /content/
-!unzip bpe_files.zip
-
-# Commented out IPython magic to ensure Python compatibility.
-!git clone https://github.com/armaan10/transcoderplus.git
-# %cd transcoderplus/
-!git checkout v1
 
 import sys
 sys.path.insert(1, './utils')
@@ -417,5 +409,5 @@ if __name__=="__main__":
   word_l=[['return','if','None'],['return','if','NULL']]
   torch.save(model.state_dict,"/content/model-{}".format(epochs))
 
-visualise_pretrain(model,word_l,[dict_py,dict_cpp])
+  visualise_pretrain(model,word_l,[dict_py,dict_cpp])
 

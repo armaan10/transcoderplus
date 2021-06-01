@@ -7,13 +7,23 @@ Original file is located at
     https://colab.research.google.com/drive/17wek7XbkIhGDoJQGvcTKRFXKIjJfF6rO
 """
 
+#from google.colab import drive
+#drive.mount('/content/gdrive')
+
+#!unzip  /content/gdrive/MyDrive/trasncoderstuff/test_data_transcoder.zip -d /content/
+
+# Commented out IPython magic to ensure Python compatibility.
+!git clone https://github.com/armaan10/transcoderplus.git
+# %cd transcoderplus/
+!git checkout v1
 
 import sys
-#sys.path.insert(1, './utils')
+sys.path.insert(1, '/content/transcoderplus/utils')
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
 import link
+
 import parser
 import random
 import time
@@ -22,42 +32,105 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import numpy as np
 
+def Embedding(num_embeddings, embedding_dim, padding_idx=None):
+    m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
+    nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
+    if padding_idx is not None:
+        nn.init.constant_(m.weight[padding_idx], 0)
+    return m
+def test(model,words,dicto,lang):
+  masked_words,_=mask_tokens(words.copy(),15)
+  masked_words_pr=masked_words.copy()
+  #print(masked_words)
+  masked_words=make_batches(masked_words,32,64,pad=True)
+  soft=nn.LogSoftmax(dim=1)
+  masked_vecs,_=get_mask_pad_matrix(model_dim,masked_words,32,64)
+  masked_words=get_tokens_idx(masked_words,dicto)
+  
+  
+  input=torch.transpose(masked_words[0],0,1).to(device)
+  masked_vecs=torch.transpose(masked_vecs[0],0,1).to(device)
+  
+  lang_ids=torch.zeros(input.size()).long()
+  lang_ids+=lang_dict[lang]
+
+  output,_=model(input,masked_vecs,lang_ids.to(device),mask_flag=False)
+  
+  
+  output=output.view(-1,len(dicto))
+  output=soft(output)
+  output_idx=torch.argmax(output,dim=1)
+  words_idx=make_batches(words,32,64)
+  words_idx=get_tokens_idx(words_idx,dicto)
+  words_idx=torch.transpose(words_idx[0],0,1)
+  words_idx=words_idx.reshape(-1).to(device)
+  print(words_idx.size(),output_idx.size())
+  print(100*(words_idx==output_idx).sum()/len(words) )
+  key=list(dicto.keys())
+  #print(output_idx)
+  preds=[key[x] for x in list(output_idx)]
+  print(words)
+  print(masked_words_pr)
+  print(preds)
+
 class EncoderNet(nn.Module):
-    def __init__ (self,vocab_size,model_dim,att_h,output_dim,num_layers,pad_idx):
+    def __init__ (self,vocab_size,n_langs,model_dim,att_h,output_dim,num_layers,pad_idx,dropout=0.1):
         super(EncoderNet,self).__init__()
-        self.encoder_layer=nn.TransformerEncoderLayer(model_dim,att_h,output_dim)   
+        #encoder declare
+        self.encoder_layer=nn.TransformerEncoderLayer(model_dim,att_h)   
         self.encoder=nn.TransformerEncoder(self.encoder_layer,num_layers)
+        #positional embeddings
         self.pos_enc=PositionalEncoding(model_dim)
-        self.emd_py=nn.Embedding(vocab_size[0],model_dim,padding_idx=pad_idx[0])
-        self.emd_cpp=nn.Embedding(vocab_size[1],model_dim,padding_idx=pad_idx[1])
-        self.linear_py=nn.Linear(output_dim,vocab_size[0])
-        self.linear_cpp=nn.Linear(output_dim,vocab_size[1])
-    #pad_idx 1 -> pad it there mask_idx 1-> masked idx    
-    def forward(self,token_idx,mask_matrix,pad_idx,lang,pre_train=True):
+        #token embeddings
+        self.embedding= Embedding(vocab_size,model_dim,padding_idx=pad_idx)
+        #lang embeddings
+        self.lang_emd=Embedding(n_langs,model_dim)
+        #normalisation for embedds
+        self.layer_norm_emb = nn.LayerNorm(model_dim, eps=1e-12)
+        #dropout
+        self.dropout = nn.Dropout(p=dropout)
+        #linear layer 
+        self.linear=nn.Linear(model_dim,vocab_size)
+        self.model_dim=model_dim
+    #pad_idx 1 -> pad it there mask_idx 1-> masked idx
+        self.init_weights()
+    
+    def init_weights(self):
+        initrange = 0.1
+        self.linear.bias.data.zero_()
+        self.linear.weight.data.uniform_(-initrange, initrange)
+
+
+  
+
+
+    def forward(self,token_idx,mask_matrix,lang_id,pre_train=True,mask_flag=True):
         
-        if lang=="py":
-            inp_vec=self.emd_py(token_idx)
-        else :
-            inp_vec=self.emd_cpp(token_idx)
-        #remove pretraining in and 
-        if self.training :
+        
+        #embedding
+        inp_vec=self.embedding(token_idx)
+        inp_vec=self.pos_enc(inp_vec)
+        inp_vec+=self.lang_emd(lang_id)
+        inp_vec=self.layer_norm_emb(inp_vec)
+        inp_vec=self.dropout(inp_vec)
+        if mask_flag  :
           try:
             assert inp_vec.size()==mask_matrix.size()
           except AssertionError as error:
             error.args+=(inp_vec.size(),mask_matrix.size())
             raise
           #create random vector for mask token
-          inp_vec=(inp_vec*mask_matrix)
-        inp_vec=self.pos_enc(inp_vec)
-        output=self.encoder(inp_vec)
-        if not self.training or pre_train==False:
-          return output 
-        if lang=="py":
-            output=self.linear_py(output)
-        else:
-            output=self.linear_cpp(output)
-        #output=F.softmax(output)
-        return output
+          if mask_flag:
+            inp_vec=(inp_vec*mask_matrix)
+        
+        enc_output=self.encoder(inp_vec)
+
+        #word preds
+
+        preds=self.linear(enc_output)  
+        #print(output.size())
+        
+        return preds,enc_output
 
         
 
@@ -76,10 +149,35 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
         self.register_buffer('pe', pe)
-
+#might add dropout back here
     def forward(self, x):
         x = x + self.pe[:x.size(0), :]
-        return self.dropout(x)
+        return x
+
+def get_masks(slen, lengths, causal):
+    """
+    Generate hidden states mask, and optionally an attention mask.
+    """
+    assert lengths.max().item() <= slen
+    bs = lengths.size(0)
+    alen = torch.arange(slen, dtype=torch.long, device=lengths.device)
+    mask = alen < lengths[:, None]
+
+    # attention mask is the same as mask, or triangular inferior attention (causal)
+    if causal:
+        attn_mask = alen[None, None, :].repeat(bs, slen, 1) <= alen[None, :, None]
+    else:
+        attn_mask = mask
+
+    # sanity check
+    try:
+      assert mask.size() == (bs, slen)
+    except AssertionError as error:
+      error.args+=(mask.size())
+      raise
+    assert causal is False or attn_mask.size() == (bs, slen, slen)
+
+    return mask, attn_mask
 
 def make_batches(tokens,no_seqs=32,inp_l=16,pad=True):
     no_iters=int(len(tokens)/(no_seqs*inp_l))
@@ -119,14 +217,14 @@ def mask_tokens(tokens,masking_per=15):
         tokens[i]="[MASK]"
    
     return tokens,masked_token_l    
-def make_targets(token_batch,dicto,vocab_vecs):
+def make_targets(token_batch,dicto):
     batch_v=[]
     for batch in token_batch:
         seq_v=[]
         for seq in batch:
             
             
-            seq_v.append(link.lookup(seq,dicto,vocab_vecs))
+            seq_v.append(torch.LongTensor([dicto[x] for x in seq]))
 
             #print(vecs.size())
         #print(torch.stack(seq_v))
@@ -170,149 +268,138 @@ def get_mask_pad_matrix(embd_dim,token_batch,no_seqs,seq_l):
 
 
 
-def train(model,optimizer,criterion,tokens,dicto,vocab_size,no_seqs,seq_l,one_hot,epochs=500):
+def train(model,optimizer,scheduler,criterion,tokens,dicto,vocab_size,lang_dict,no_seqs,seq_l,epochs=500):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.train()
     
-    #unmasked_train_set_py=make_batches(tokens_list_py)
-    #unmasked_train_set_cpp=make_batches(tokens_list_cpp)
-    #targets_py=make_targets(unmasked_train_set_py,dict_py,one_hot_vecs_py)
-    #print(len(token_list_cpp))
-    #targets_cpp=make_targets(unmasked_train_set_cpp,dict_cpp,one_hot_vecs_cpp)
+  
     tokens_list_py=tokens[0]
     tokens_list_cpp=tokens[1]
-    dict_py=dicto[0]
-    dict_cpp=dicto[1]
-    one_hot_vecs_py=one_hot[0]
-    one_hot_vecs_cpp=one_hot[1]
+
+   
     
     del tokens
-    del dicto
-    del one_hot
+    
+   
 
     epl=[]
     l=[]
     loss_total=0
+    iter_r=1
     #run funcs each batch at a time 
     start_time=time.time()
+    update_interval=5
+    
     for ep in range(1,epochs+1):
-        no_batches_py=int(len(tokens_list_py)/(no_seqs*seq_l))
-        no_batches_cpp=int(len(tokens_list_cpp)/(no_seqs*seq_l))
+        no_batches_py=math.ceil(len(tokens_list_py)/(no_seqs*seq_l))-1
+        no_batches_cpp=math.ceil(len(tokens_list_cpp)/(no_seqs*seq_l))-1
         
         #mask tokens
-        masked_tokens_py,_=mask_tokens(tokens_list_py)
-        masked_tokens_cpp,_=mask_tokens(tokens_list_cpp)
-        iter_r=0
+        if "[MASK]" in (tokens_list_py or tokens_list_cpp):
+          print("ERORRRRRRRRRR")
+          return model
+     
+        masked_tokens_py,_=mask_tokens(tokens_list_py.copy())
+
+        masked_tokens_cpp,_=mask_tokens(tokens_list_cpp.copy())
+        
+        #masked_tokens_py=tokens_list_py.copy()
+
+        #masked_tokens_cpp=tokens_list_cpp.copy()
+        
+        
         py_iter=0
         cpp_iter=0
-        for batch_l in range(2*(max(no_batches_cpp,no_batches_py)+1)):
+        batch_done_flag_py=False
+        batch_done_flag_cpp=False
+        while batch_done_flag_py==False or batch_done_flag_cpp==False :
           
-          if batch_l%2==0:
+          if iter_r%2==0:
             lang="py"
             if py_iter == no_batches_py:
               mask_tokens_l = masked_tokens_py[py_iter*(no_seqs*seq_l):]        
               tokens_list=tokens_list_py[py_iter*(no_seqs*seq_l):]
-            
+              batch_done_flag_py=True
               
             else:
               mask_tokens_l = masked_tokens_py[py_iter*(no_seqs*seq_l):(py_iter+1)*no_seqs*seq_l]        
               tokens_list=tokens_list_py[py_iter*(no_seqs*seq_l):(py_iter+1)*no_seqs*seq_l]
-            dicto=dict_py
-            one_hot_vecs=one_hot_vecs_py
+            
+            
             py_iter=(py_iter+1)%(no_batches_py+1)
           else :
             lang="cpp"
             if cpp_iter== no_batches_cpp:
               mask_tokens_l = masked_tokens_cpp[cpp_iter*(no_seqs*seq_l):]        
-              tokens_list=tokens_list_cpp[cpp_iter*(no_seqs*seq_l):]  
+              tokens_list=tokens_list_cpp[cpp_iter*(no_seqs*seq_l):]
+              batch_done_flag_cpp = True  
             else:
               mask_tokens_l = masked_tokens_cpp[cpp_iter*(no_seqs*seq_l):(cpp_iter+1)*no_seqs*seq_l]        
               tokens_list=tokens_list_cpp[cpp_iter*(no_seqs*seq_l):(cpp_iter+1)*no_seqs*seq_l]
 
-            dicto=dict_cpp
-            one_hot_vecs=one_hot_vecs_cpp
+            
+            
             cpp_iter=(cpp_iter+1)%(no_batches_cpp+1)
+          #print(batch_done_flag_py,batch_done_flag_cpp)
+          iter_r+=1
           #make training stuff
-          masked_batch=make_batches(mask_tokens_l)
+          masked_batch=make_batches(mask_tokens_l,no_seqs,seq_l)
           mask_mat,pad_mat=get_mask_pad_matrix(model_dim,masked_batch,no_seqs,seq_l)
           
          
           masked_idx=get_tokens_idx(masked_batch,dicto)
           
           #make targets
-          targets=make_batches(tokens_list)
-          targets=make_targets(targets,dicto,one_hot_vecs)
+          targets=make_batches(tokens_list,no_seqs,seq_l)
+          targets=get_tokens_idx(targets,dicto)
+          #make lang_id tensor
+          
+          lang_ids=torch.zeros((seq_l,masked_idx[0].size()[0])).long()
+          lang_ids+=lang_dict[lang]
+          #print(lang_ids.size(),masked_idx[0].size())
           optimizer.zero_grad()
-      
-          #lang.to(device)
-          #print(tokens_idx.size(),pad.size())"
-          #print("LANGUAGE",lang)
-          output = model(masked_idx[0].to(device),mask_mat[0].to(device),0,lang)
-          #print(output.view(no_seqs*seq_l,vocab_size[0]).size(),output.view(no_seqs*seq_l,vocab_size[0]).size())
-          output=output.view(-1,vocab_size[0 if lang=="py" else 1])
-          number_seqs=targets[0].size()[0]
-          targets=targets[0].view(number_seqs*seq_l,vocab_size[0 if lang=="py" else 1]).to(device).long()
-          targets=torch.argmax(targets,dim=1)
+          #print((masked_idx[0]==targets[0]).sum(),masked_idx[0].size()[0]*masked_idx[0].size()[1])
+          #shape(S,N,E)    
+          output,_ = model(torch.transpose(masked_idx[0],0,1).to(device),torch.transpose(mask_mat[0],0,1).to(device),lang_ids.to(device),mask_flag=False)
+          
+          #flatten (tokens,vocab_size)
+          output=output.view(-1,vocab_size)
+          # (N,S) -->(S,N)
+          targets=torch.transpose(targets[0],0,1)
+          #targets=targets[0]
+          #print(targets.size())
+          targets=targets.reshape(-1).to(device).long()
+          
+         
+          
           #output=torch.argmax(output,dim=1)
           loss=criterion(output,targets)
           #print(loss)
-          loss_total+=loss.item()
           loss.backward()
-          optimizer.step()
+          torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
           
+          optimizer.step()
+          loss_total+=loss.item()
                
 
-        """ 
-        #make into batches
-        masked_batch_py = make_batches(masked_tokens_py)
-        masked_batch_cpp=make_batches(masked_tokens_cpp)
-        #get padding and masking matrix
-        mask_py,pad_py=get_mask_pad_matrix(model_dim, masked_batch_py, no_seqs, seq_l)
-        mask_cpp,pad_cpp=get_mask_pad_matrix(model_dim, masked_batch_cpp, no_seqs, seq_l)
-        #get token indexes
-        masked_idx_py=get_tokens_idx(masked_batch_py, dict_py)
-        masked_idx_cpp=get_tokens_idx(masked_batch_cpp, dict_cpp)        
-        #alternate batches 
-        loss_total=0    
-       
-        for iter_n in range (len(masked_batch_py)+len(masked_batch_cpp)):
-            py_iter=0
-            cpp_iter=0
-            if iter_n%2==0 or cpp_iter>=len(masked_batch_cpp) and py_iter<len(masked_batch):
-              tokens_idx=masked_idx_py[py_iter]
-              mask=mask_py[py_iter]
-              pad=pad_py[py_iter]
-              
-              targets=targets_py[py_iter]
-              py_iter+=1
-              lang="py"
-         
-            else:
-                tokens_idx=masked_idx_cpp[cpp_iter]
-                mask=mask_cpp[cpp_iter]
-                pad=pad_cpp[cpp_iter]
-                targets=targets_cpp[cpp_iter]
-                cpp_iter+=1
-                
-                lang="cpp"
-          
-            """
+      
 
-        log_int=50
-        if ep%log_int ==0:
-              end_time=time.time()
-              t=end_time-start_time
-              start_time=time.time()
-              print("time:",t,"epoch:",ep,"loss:",loss_total/log_int)
-              epl.append(ep)
-              l.append(loss_total/log_int)
-              loss_total=0
-              
+
+          log_int=10
+          if iter_r%log_int ==0:
+                end_time=time.time()
+                t=end_time-start_time
+                start_time=time.time()
+                print("time:",t,"epoch:",ep,"loss:",loss_total/log_int,"lr:",scheduler.get_last_lr()[0])
+                epl.append(iter_r)
+                l.append(loss_total/log_int)
+                loss_total=0
+        scheduler.step()
     plt.plot(epl,l)
     return model
 #train()
 
-def visualise_pretrain(model,word_list,dict_l):
+def visualise_pretrain(model,word_list,dict_l,lang_dict):
 
   
   color=['green','red']
@@ -325,13 +412,17 @@ def visualise_pretrain(model,word_list,dict_l):
     
     
     batches=make_batches(word_list[i],pad=False)
-    tokens_idx=get_tokens_idx(batches,dict_l[i])
+    tokens_idx=get_tokens_idx(batches,dict_l)
     
-    output=model(tokens_idx[0].to(device),0,0,lang)
+    #lang emb
+    lang_ids=torch.zeros((tokens_idx[0].size()[1],tokens_idx[0].size()[0])).long()
+    lang_ids+=lang_dict[lang]
+    
+    _,output=model(torch.transpose(tokens_idx[0],0,1).to(device),0,lang_ids.to(device),mask_flag=False )
     
     
-    output=output.squeeze(0)
-   
+    output=output.squeeze(1)
+    print(output.size())
     output=output.cpu()
     output=output.detach().numpy()
     
@@ -343,22 +434,25 @@ def visualise_pretrain(model,word_list,dict_l):
 
 #visualise_pretrain(word_l)
 
+
+
 if __name__=="__main__":
-  vocab_py=parser.read_file("/content/bpe_files/py_train_vocab")
-  tokens_py=parser.read_file("/content/bpe_files/py_train_bpe")
-  vocab_cpp=parser.read_file("/content/bpe_files/cpp_train_vocab")
-  tokens_cpp=parser.read_file("/content/bpe_files/cpp_train_bpe")
+  tokens_py=parser.read_file("/content/content/TransCoder/data/test_dataset/cpp-java-python.with_comments/python.train.with_comments.0.functions_standalone.bpe")
+  vocab=parser.read_file("/content/content/TransCoder/data/test_dataset/cpp-java-python.with_comments/vocab.all")
+  tokens_cpp=parser.read_file("/content/content/TransCoder/data/test_dataset/cpp-java-python.with_comments/cpp.train.with_comments.0.functions_standalone.bpe")
 
   tokens_list_py=[]
   tokens_list_cpp=[]
-  #imp part add later 
+
+  #split into tokens 
+
   for i in tokens_py:
         tokens_list_py+=i.split()
   for i in tokens_cpp:
         tokens_list_cpp+=i.split()
-  dict_py,size_py=link.create_dict(vocab_py)
-  dict_cpp,size_cpp=link.create_dict(vocab_cpp)
-  special_tks=["[MASK]","[PAD]"]
+  dicto,vocab_size=link.create_dict(vocab)
+  #tokens_list_cpp=tokens_list_cpp[:512]
+  #tokens_list_py=tokens_list_py[:512]
   special_tks={
   "mask"  : "[MASK]",
   "pad"   : "[PAD]",
@@ -366,48 +460,80 @@ if __name__=="__main__":
   "start_py"  : "[PY_S]",
   "start_cpp" : "[CPP_S]"
 
-}
-  for keys in special_tks:
-    dict_py[special_tks[keys]]=size_py
-    dict_cpp[special_tks[keys]]=size_cpp
-    size_py+=1
-    size_cpp+=1
-  """dict_py[special_tks[0]]=size_py
-  dict_py[special_tks[1]]=size_py+1
+  }
+  lang_dict={ "py":0,
+            "cpp":1
+            }
 
-  size_py+=2
-  dict_cpp[special_tks[0]]=size_cpp
-  dict_cpp[special_tks[1]]=size_cpp+1
-  size_cpp+=2"""
-  pad_idx=[dict_py[special_tks["pad"]],dict_cpp[special_tks["pad"]]]
-  #print(tokens_list_py)
+
+  for keys in special_tks:
+    dicto[special_tks[keys]]=vocab_size
+    vocab_size+=1
+  pad_idx=dicto[special_tks["pad"]]
 
   #reduce cpp for now
-  tokens_list_cpp=tokens_list_cpp[:5000]
+  #tokens_list_cpp=tokens_list_cpp[:1000]
 
   #encoder params def
-  vocab_size=[size_py,size_cpp]
   model_dim=1024
   att_h=8
   output_dim=1024
   num_layers=6
-  lr=0.01
+  lr=0.0001
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-  model=EncoderNet(vocab_size, model_dim, att_h, output_dim,num_layers,pad_idx).to(device)
+  model=EncoderNet(vocab_size,len(lang_dict), model_dim, att_h, output_dim,num_layers,pad_idx).to(device)
   criterion=nn.CrossEntropyLoss()
   optimizer=torch.optim.Adam(model.parameters(),lr=lr,betas=(0.9,0.98))
+  scheduler = torch.optim.lr_scheduler.StepLR(optimizer,5, gamma=0.95)
   #training params
   no_seqs=32
-  seq_l=16
-  one_hot_vecs_py=torch.eye(size_py)
-  one_hot_vecs_cpp=torch.eye(size_cpp)
-  epochs=500
-  model=train(model,optimizer,criterion,[tokens_list_py,tokens_list_cpp],[dict_py,dict_cpp],vocab_size,no_seqs,seq_l,[one_hot_vecs_py,one_hot_vecs_cpp],epochs)
-
+  seq_l=64
+  epochs=50
+  model=train(model,optimizer,scheduler,criterion,[tokens_list_py,tokens_list_cpp],dicto,vocab_size,lang_dict,no_seqs,seq_l,epochs)
+  torch.save(model.state_dict(),"/content/model-{}".format(epochs))
   model.eval()
   #index 0-py 1-cpp
   word_l=[['return','if','None'],['return','if','NULL']]
-  torch.save(model.state_dict,"/content/model-{}".format(epochs))
 
-  visualise_pretrain(model,word_l,[dict_py,dict_cpp])
+from google.colab import files
+  files.download("/content/modelfinal-{}".format(epochs))
+
+visualise_pretrain(model,word_l,dicto,lang_dict)
+
+#!cp /content/model-1000 /content/gdrive/MyDrive/trasncoderstuff/
+
+words = tokens_list_py[:12]
+  #batch= make_batches(words,3,2)
+  #targets=get_tokens_idx(batch,dict_py)
+  #targets=targets[0]
+  #a=torch.transpose(targets,0,1)
+  print(words)
+
+
+
+model.eval()
+  tokens_test=parser.read_file("/content/content/TransCoder/data/test_dataset/cpp-java-python.with_comments/python.test.with_comments.functions_standalone.bpe")
+  tokens_list_test=[]
+
+  #split into tokens 
+
+  for i in tokens_test:
+        tokens_list_test+=i.split()
+  test(model,tokens_list_test,dicto,"py")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -12,10 +12,9 @@ Original file is located at
 
 #!unzip  /content/gdrive/MyDrive/trasncoderstuff/test_data_transcoder.zip -d /content/
 
-# Commented out IPython magic to ensure Python compatibility.
-!git clone https://github.com/armaan10/transcoderplus.git
-# %cd transcoderplus/
-!git checkout v1
+#!git clone https://github.com/armaan10/transcoderplus.git
+#%cd transcoderplus/
+#!git checkout v1
 
 import sys
 sys.path.insert(1, '/content/transcoderplus/utils')

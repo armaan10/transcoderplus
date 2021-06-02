@@ -493,24 +493,14 @@ if __name__=="__main__":
   model.eval()
   #index 0-py 1-cpp
   word_l=[['return','if','None'],['return','if','NULL']]
-
-from google.colab import files
-  files.download("/content/modelfinal-{}".format(epochs))
-
-visualise_pretrain(model,word_l,dicto,lang_dict)
-
-#!cp /content/model-1000 /content/gdrive/MyDrive/trasncoderstuff/
-
-words = tokens_list_py[:12]
+  visualise_pretrain(model,word_l,dicto,lang_dict)
+  words = tokens_list_py[:12]
   #batch= make_batches(words,3,2)
   #targets=get_tokens_idx(batch,dict_py)
   #targets=targets[0]
   #a=torch.transpose(targets,0,1)
   print(words)
-
-
-
-model.eval()
+  model.eval()
   tokens_test=parser.read_file("/content/content/TransCoder/data/test_dataset/cpp-java-python.with_comments/python.test.with_comments.functions_standalone.bpe")
   tokens_list_test=[]
 
@@ -519,6 +509,18 @@ model.eval()
   for i in tokens_test:
         tokens_list_test+=i.split()
   test(model,tokens_list_test,dicto,"py")
+
+
+
+
+
+#!cp /content/model-1000 /content/gdrive/MyDrive/trasncoderstuff/
+
+
+
+
+
+
 
 
 

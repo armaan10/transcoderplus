@@ -199,6 +199,7 @@ def make_batches(tokens,no_seqs=32,inp_l=16,pad=True):
           seqs.append(rem_batch[i*inp_l:(i+1)*inp_l])
       #pad rem_batch
       if len(rem_batch[no_iters*inp_l:])>0:
+        print("padding")
         if pad:
           padded_seq= rem_batch[no_iters*inp_l:]+["[PAD]"]*abs(len(rem_batch[no_iters*inp_l:]) -inp_l)   
           seqs.append(padded_seq)

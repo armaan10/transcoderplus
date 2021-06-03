@@ -198,12 +198,13 @@ def make_batches(tokens,no_seqs=32,inp_l=16,pad=True):
       for i in range(no_iters):
           seqs.append(rem_batch[i*inp_l:(i+1)*inp_l])
       #pad rem_batch
-      if pad:
-        padded_seq= rem_batch[no_iters*inp_l:]+["[PAD]"]*abs(len(rem_batch[no_iters*inp_l:]) -inp_l)   
-        seqs.append(padded_seq)
-      else:
-        if len(rem_batch[no_iters*inp_l:])>0:
-          seqs.append(rem_batch[no_iters*inp_l:])
+      if len(rem_batch[no_iters*inp_l:])>0:
+        if pad:
+          padded_seq= rem_batch[no_iters*inp_l:]+["[PAD]"]*abs(len(rem_batch[no_iters*inp_l:]) -inp_l)   
+          seqs.append(padded_seq)
+        else:
+          
+            seqs.append(rem_batch[no_iters*inp_l:])
       
       batches.append(seqs)
     return batches
